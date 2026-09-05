@@ -1,0 +1,117 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build MEKPAIE executable",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build MEKPAIE with icon",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check MEKPAIE process",
+			"type": "shell",
+			"command": "tasklist",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build MEKPAIE icon copy",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"--distpath",
+				"dist_icon",
+				"--workpath",
+				"build_icon",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build MEKPAIE icon cached",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist_icon",
+				"--workpath",
+				"build\\MEKPAIE",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Rebuild MEKPAIE with Mek logo",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"--distpath",
+				"dist_rebuild",
+				"--workpath",
+				"build_rebuild",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Finish MEKPAIE rebuild",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--distpath",
+				"dist_rebuild",
+				"--workpath",
+				"build_rebuild",
+				"MEKPAIE.spec"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
