@@ -95,6 +95,8 @@ class PDFPayslipGenerator:
         story.append(Spacer(1, 0.3*cm))
 
         story.extend(self._create_ir_detail_section(payroll_data, employee_info))
+        story.append(Spacer(1, 0.15*cm))
+        story.extend(self._create_net_to_pay_section(payroll_data))
         story.append(Spacer(1, 0.3*cm))
 
         # Add final summary table at the end of the bulletin
@@ -312,8 +314,9 @@ class PDFPayslipGenerator:
             fontName='Helvetica-Bold'
         )
         
+        net_taxable_salary = float(payroll_data.get('net_taxable_salary', 0) or 0)
         net_data = [
-            [Paragraph(f"NET IMPOSABLE: {payroll_data.get('net_taxable_salary', 0):.2f} DH", net_style)],
+            [Paragraph(f"NET IMPOSABLE: {net_taxable_salary:.2f} DH", net_style)],
         ]
         
         net_table = Table(net_data, colWidths=[18*cm])
@@ -329,6 +332,37 @@ class PDFPayslipGenerator:
         elements.append(net_table)
         
         return elements
+
+    def _create_net_to_pay_section(self, payroll_data: Dict[str, Any]) -> list:
+        """Create the net-to-pay highlight below the premiums table."""
+        styles = getSampleStyleSheet()
+        net_style = ParagraphStyle(
+            'NetToPay',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.white,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        net_taxable_salary = float(payroll_data.get('net_taxable_salary', 0) or 0)
+        total_premiums = sum(
+            float(payroll_data.get(premium_key, 0) or 0)
+            for premium_key in ('salary_premium', 'wage_premium', 'transport_premium')
+        )
+        net_to_pay = net_taxable_salary + total_premiums
+        net_table = Table(
+            [[Paragraph(f"NET À PAYER: {net_to_pay:.2f} DH", net_style)]],
+            colWidths=[18*cm]
+        )
+        net_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, -1), NAVY),
+            ('BOX', (0, 0), (-1, -1), 0.8, BLUE),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ]))
+        return [net_table]
 
     def _create_ir_detail_section(self, payroll_data: Dict, employee_info: Optional[Dict[str, Any]] = None) -> list:
         """Create premiums section for simplified payroll."""
@@ -437,7 +471,7 @@ class PDFPayslipGenerator:
                 '',
                 '',
                 Paragraph('Frais profession.', section_style),
-                Paragraph('Net à payer', section_style),
+                Paragraph('NET IMPOSABLE', section_style),
             ],
             [
                 Paragraph('Déclarés CNSS', cell_style),
