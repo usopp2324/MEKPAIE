@@ -111,7 +111,7 @@ class Settings(QWidget):
         
         about_group.setLayout(about_layout)
         layout.addWidget(about_group)
-        
+            
         layout.addStretch()
         
         self.setLayout(layout)
