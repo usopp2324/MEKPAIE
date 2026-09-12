@@ -1,15 +1,18 @@
 """
 Settings and backup view for MEKPAIE.
 """
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QFormLayout, QFileDialog, QMessageBox
+    QGroupBox, QFormLayout, QFileDialog, QMessageBox, QLineEdit
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from app.widgets import StyledButton, InfoDialog, ConfirmDialog, ErrorDialog
 from app.services.backup_service import BackupService
-from app.database import DB_FILE
+from app.database import DB_FILE, get_session
+from app.models import Settings as SettingsModel
+from app.paths import PDF_DIR
 
 
 class Settings(QWidget):
@@ -76,12 +79,33 @@ class Settings(QWidget):
         
         db_group.setLayout(db_layout)
         layout.addWidget(db_group)
+
+        # Payslip output section
+        pdf_group = QGroupBox("Emplacement des bulletins")
+        pdf_layout = QFormLayout()
+
+        pdf_path_layout = QHBoxLayout()
+        self.pdf_path_edit = QLineEdit()
+        self.pdf_path_edit.setReadOnly(True)
+        self.pdf_path_edit.setToolTip("Dossier dans lequel les nouveaux bulletins PDF seront enregistrés")
+        choose_pdf_path_btn = StyledButton("Choisir...", "primary")
+        choose_pdf_path_btn.clicked.connect(self.choose_pdf_directory)
+        pdf_path_layout.addWidget(self.pdf_path_edit, 1)
+        pdf_path_layout.addWidget(choose_pdf_path_btn)
+        pdf_layout.addRow("Dossier des PDF:", pdf_path_layout)
+
+        pdf_info = QLabel("Les prochains bulletins seront enregistrés dans ce dossier.")
+        pdf_info.setStyleSheet("color: #7f8c8d;")
+        pdf_layout.addRow("", pdf_info)
+        pdf_group.setLayout(pdf_layout)
+        layout.addWidget(pdf_group)
+        self.load_pdf_directory()
         
         # About section
         about_group = QGroupBox("À propos")
         about_layout = QFormLayout()
         
-        about_text = QLabel("MEKPAIE v1.0.0\n\nGestion de paie professionnelle au Maroc\n\n© 2026")
+        about_text = QLabel("MEKPAIE v1.0.0 (Beta) \n\n Made By USOPP \n\n 2026")
         about_text.setStyleSheet("color: #7f8c8d;")
         about_layout.addRow(about_text)
         
@@ -91,6 +115,49 @@ class Settings(QWidget):
         layout.addStretch()
         
         self.setLayout(layout)
+
+    def load_pdf_directory(self):
+        """Load the configured payslip directory, or show the default path."""
+        path = PDF_DIR
+        try:
+            session = get_session()
+            setting = session.query(SettingsModel).filter(
+                SettingsModel.key == "pdf_directory"
+            ).first()
+            if setting and setting.value:
+                path = Path(setting.value)
+            session.close()
+        except Exception:
+            pass
+        self.pdf_path_edit.setText(str(path))
+
+    def choose_pdf_directory(self):
+        """Choose and save the folder used for generated payslip PDFs."""
+        selected_path = QFileDialog.getExistingDirectory(
+            self,
+            "Choisir le dossier des bulletins",
+            self.pdf_path_edit.text() or str(PDF_DIR),
+        )
+        if not selected_path:
+            return
+
+        try:
+            path = Path(selected_path)
+            path.mkdir(parents=True, exist_ok=True)
+            session = get_session()
+            setting = session.query(SettingsModel).filter(
+                SettingsModel.key == "pdf_directory"
+            ).first()
+            if setting:
+                setting.value = str(path)
+            else:
+                session.add(SettingsModel(key="pdf_directory", value=str(path)))
+            session.commit()
+            session.close()
+            self.pdf_path_edit.setText(str(path))
+            InfoDialog(self, message=f"Dossier des bulletins enregistré:\n{path}").exec()
+        except Exception as error:
+            ErrorDialog(self, message=f"Impossible d'enregistrer ce dossier: {error}").exec()
     
     def create_backup(self):
         """Create a backup."""

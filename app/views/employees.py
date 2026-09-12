@@ -76,6 +76,25 @@ class EmployeeDialog(FormDialog):
         self.base_salary.setMinimum(0)
         self.base_salary.setMaximum(999999)
         self.base_salary.setSingleStep(100)
+        self.salary_premium_per_day = QDoubleSpinBox()
+        self.salary_premium_per_day.setMinimum(0)
+        self.salary_premium_per_day.setMaximum(9999)
+        self.salary_premium_per_day.setSingleStep(0.5)
+        self.wage_premium_per_day = QDoubleSpinBox()
+        self.wage_premium_per_day.setMinimum(0)
+        self.wage_premium_per_day.setMaximum(9999)
+        self.wage_premium_per_day.setSingleStep(0.5)
+        self.transport_premium_per_day = QDoubleSpinBox()
+        self.transport_premium_per_day.setMinimum(0)
+        self.transport_premium_per_day.setMaximum(9999)
+        self.transport_premium_per_day.setSingleStep(0.5)
+        self.leave_balance = QDoubleSpinBox()
+        self.leave_balance.setMinimum(0)
+        self.leave_balance.setMaximum(365)
+        self.leave_balance.setSingleStep(0.5)
+        self.leave_balance.setToolTip(
+            "Le solde saisi ici augmente automatiquement de 1,5 jour chaque mois."
+        )
         self.payment_method = QComboBox()
         self.payment_method.addItems(["Virement", "Chèque", "Espèces"])
         
@@ -85,8 +104,12 @@ class EmployeeDialog(FormDialog):
         self.form_layout.addRow("Type de contrat:", self.contract_type)
         self.form_layout.addRow("Catégorie:", self.categorie)
         self.form_layout.addRow("Prime de transport:", self.transport_premium_enabled)
+        self.form_layout.addRow("Prime de salissure / jour:", self.salary_premium_per_day)
+        self.form_layout.addRow("Prime de panier / jour:", self.wage_premium_per_day)
+        self.form_layout.addRow("Prime de transport / jour:", self.transport_premium_per_day)
+        self.form_layout.addRow("Solde congés actuel (jours):", self.leave_balance)
         self.form_layout.addRow("Statut:", self.status)
-        self.form_layout.addRow("Salaire  par heure:", self.base_salary)
+        self.form_layout.addRow("Salaire de base (mensuel):", self.base_salary)
         self.form_layout.addRow("Mode de paiement:", self.payment_method)
         
         # Social info
@@ -143,6 +166,10 @@ class EmployeeDialog(FormDialog):
             self.categorie.setCurrentText(self.employee.categorie or "Mensuel")
             self.transport_premium_enabled.setChecked(bool(self.employee.transport_premium_enabled))
             self.status.setCurrentText(self.employee.status or "Actif")
+            self.salary_premium_per_day.setValue(float(self.employee.salary_premium_per_day or 8.0))
+            self.wage_premium_per_day.setValue(float(self.employee.wage_premium_per_day or 22.8))
+            self.transport_premium_per_day.setValue(float(self.employee.transport_premium_per_day or 19.0))
+            self.leave_balance.setValue(float(self.employee.leave_balance or 0.0))
             self.base_salary.setValue(self.employee.base_salary or 0)
             self.payment_method.setCurrentText(self.employee.payment_method or "Virement")
             self.cnss.setText(self.employee.cnss or "")
@@ -166,6 +193,10 @@ class EmployeeDialog(FormDialog):
             "categorie": self.categorie.currentText(),
             "transport_premium_enabled": self.transport_premium_enabled.isChecked(),
             "status": self.status.currentText(),
+            "salary_premium_per_day": self.salary_premium_per_day.value(),
+            "wage_premium_per_day": self.wage_premium_per_day.value(),
+            "transport_premium_per_day": self.transport_premium_per_day.value(),
+            "leave_balance": self.leave_balance.value(),
             "base_salary": self.base_salary.value(),
             "payment_method": self.payment_method.currentText(),
             "cnss": self.cnss.text(),
@@ -211,7 +242,7 @@ class Employees(QWidget):
         # Table
         self.table = DataTable([
             "Matricule", "Nom", "Prénom", "CIN", "CNSS",
-            "Fonction", "Département", "Salaire", "Statut", "Actions"
+            "Fonction", "Département", "Salaire de base", "Statut", "Actions"
         ])
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
         layout.addWidget(self.table)
@@ -343,9 +374,13 @@ class Employees(QWidget):
                     session = get_session()
                     emp_db = session.query(Employee).get(emp.id)
                     data = dialog.get_form_data()
+                    balance_changed = float(emp_db.leave_balance or 0) != float(data["leave_balance"])
                     
                     for key, value in data.items():
                         setattr(emp_db, key, value)
+                    if balance_changed:
+                        emp_db.leave_balance_year = datetime.now().year
+                        emp_db.leave_balance_month = datetime.now().month
                     
                     session.commit()
                     session.close()

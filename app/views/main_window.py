@@ -157,6 +157,9 @@ class MainWindow(QMainWindow):
                 font-family: "Segoe UI";
                 font-size: 10pt;
             }
+            QWidget#sidebar {
+                background-color: #162636;
+            }
             QMenuBar {
                 background-color: #ffffff;
                 border-bottom: 1px solid #d8e0e8;

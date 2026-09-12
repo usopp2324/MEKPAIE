@@ -2,6 +2,7 @@
 Database configuration and setup using SQLAlchemy ORM.
 """
 from pathlib import Path
+from datetime import datetime
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import StaticPool
@@ -48,6 +49,19 @@ def _ensure_employee_columns():
         if 'transport_premium_enabled' not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE employees ADD COLUMN transport_premium_enabled BOOLEAN DEFAULT 0"))
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        for column_name, ddl in {
+            'salary_premium_per_day': 'FLOAT DEFAULT 8.0',
+            'wage_premium_per_day': 'FLOAT DEFAULT 22.8',
+            'transport_premium_per_day': 'FLOAT DEFAULT 19.0',
+            'leave_balance': 'FLOAT DEFAULT 0.0',
+            'leave_balance_year': f'INTEGER DEFAULT {current_year}',
+            'leave_balance_month': f'INTEGER DEFAULT {current_month}',
+        }.items():
+            if column_name not in columns:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE employees ADD COLUMN {column_name} {ddl}"))
     except Exception:
         # Ignore migration errors so startup can still proceed if the database is being rebuilt.
         pass
@@ -69,6 +83,7 @@ def _ensure_payroll_columns():
             'holiday_paid_days': 'FLOAT DEFAULT 0.0',
             'holiday_unpaid_days': 'FLOAT DEFAULT 0.0',
             'leave_balance': 'FLOAT DEFAULT 0.0',
+            'absence_days': 'FLOAT DEFAULT 0.0',
             'absence_justified': 'VARCHAR(255)',
             'absence_authorized': 'VARCHAR(255)',
             'absence_at': 'VARCHAR(255)',

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from app.services.payroll_calculator import PayrollRulesMorocco
+from app.views.payroll import sanitize_payroll_record_data
 
 
 SALARIES = ("3000", "3102.27", "5000", "6000", "8000", "10000", "15000", "20000")
@@ -108,6 +109,86 @@ def test_leave_balance_is_preserved_in_payroll_result():
     assert result["leave_balance"] == Decimal("12.50")
 
 
+def test_monthly_base_salary_is_converted_to_hourly_rate():
+    from app.services.simplified_payroll_calculator import hourly_rate_from_base_salary
+
+    assert hourly_rate_from_base_salary(Decimal("6000.00")) == Decimal("28.85")
+
+
+def test_absence_days_reduce_worked_hours_before_salary_is_calculated():
+    from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
+
+    result = SimplifiedPayrollCalculator().calculate_payroll(
+        hours_or_days_worked=40,
+        rate_per_unit=100,
+        categorie="Horaire",
+        absence_days=2,
+    )
+
+    assert result["absence_days"] == Decimal("2")
+    assert result["real_hours_worked"] == Decimal("24.00")
+    assert result["regular_base_salary"] == Decimal("2400.00")
+    assert result["base_salary"] == Decimal("2400.00")
+
+
+def test_hourly_category_still_uses_monthly_base_salary_conversion():
+    from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
+
+    result = SimplifiedPayrollCalculator().calculate_payroll(
+        hours_or_days_worked=176,
+        rate_per_unit=3700,
+        categorie="Horaire",
+        absence_hours=8,
+    )
+
+    assert result["real_hours_worked"] == Decimal("168.00")
+    assert result["regular_base_salary"] == Decimal("2988.72")
+    assert result["base_salary"] == Decimal("2988.72")
+
+
+def test_hourly_category_uses_hours_times_hourly_rate_for_short_month():
+    from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
+
+    result = SimplifiedPayrollCalculator().calculate_payroll(
+        hours_or_days_worked=40,
+        rate_per_unit=3700,
+        categorie="Horaire",
+    )
+
+    assert result["hourly_rate"] == Decimal("17.79")
+    assert result["regular_base_salary"] == Decimal("711.60")
+
+
+def test_monthly_category_converts_worked_days_to_hours_for_base_salary():
+    from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
+
+    result = SimplifiedPayrollCalculator().calculate_payroll(
+        hours_or_days_worked=26,
+        rate_per_unit=3700,
+        categorie="Mensuel",
+    )
+
+    assert result["real_hours_worked"] == Decimal("208.00")
+    assert result["regular_base_salary"] == Decimal("3700.00")
+
+
+def test_seniority_bonus_is_added_to_payroll_for_8_years_of_service():
+    from datetime import date, timedelta
+    from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
+
+    hire_date = date.today() - timedelta(days=8 * 365)
+    result = SimplifiedPayrollCalculator().calculate_payroll(
+        hours_or_days_worked=176,
+        rate_per_unit=6000,
+        categorie="Horaire",
+        hire_date=hire_date,
+    )
+
+    assert result["seniority_years"] == 8
+    assert result["seniority_percentage"] == Decimal("0.10")
+    assert result["seniority_bonus_amount"] == Decimal("508.00")
+
+
 def test_overtime_hours_are_paid_at_25_and_50_percent():
     from app.services.simplified_payroll_calculator import SimplifiedPayrollCalculator
 
@@ -139,3 +220,24 @@ def test_pdf_earnings_total_uses_regular_base_and_holiday_separately():
 
     assert table._cellvalues[5][2] == "3208.80"
     assert table._cellvalues[6][2] == "3361.60"
+
+
+def test_sanitize_payroll_record_data_removes_calculation_only_fields():
+    payroll_data = {
+        "regular_base_salary": Decimal("3208.80"),
+        "base_salary": Decimal("3361.60"),
+        "days_worked": Decimal("21.00"),
+        "holiday_paid_amount": Decimal("152.80"),
+        "employee_worked_holiday_day": True,
+        "all_days_worked_without_absence": False,
+        "year": 2026,
+        "month": 9,
+    }
+
+    sanitized = sanitize_payroll_record_data(payroll_data)
+
+    assert "regular_base_salary" not in sanitized
+    assert "days_worked" not in sanitized
+    assert "employee_worked_holiday_day" not in sanitized
+    assert sanitized["base_salary"] == 3361.6
+    assert sanitized["year"] == 2026

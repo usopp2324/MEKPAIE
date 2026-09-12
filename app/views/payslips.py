@@ -5,10 +5,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableWidget, QTableWidgetItem, QComboBox, QSpinBox, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
+from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 from app.widgets import StyledButton, DataTable, ConfirmDialog, ErrorDialog, InfoDialog
 from app.database import get_session
 from app.models import Payroll, Employee, Payslip
@@ -237,10 +238,73 @@ class Payslips(QWidget):
             ErrorDialog(self, message="Aucun PDF généré pour cette paie").exec()
     
     def print_payslip(self):
-        """Print payslip."""
+        """Print the selected PDF payslip through the native printer dialog."""
         payroll = self.get_selected_payroll()
-        if payroll:
-            InfoDialog(self, message="Fonctionnalité d'impression en développement").exec()
+        if not payroll:
+            ErrorDialog(self, message="Veuillez sélectionner une fiche de paie").exec()
+            return
+
+        pdf_path = self._ensure_pdf_exists(payroll)
+        if not pdf_path:
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog = QPrintDialog(printer, self)
+        dialog.setWindowTitle("Imprimer la fiche de paie")
+        if dialog.exec() != QPrintDialog.DialogCode.Accepted:
+            return
+
+        try:
+            from PyQt6.QtGui import QPainter
+            from PyQt6.QtPdf import QPdfDocument
+
+            document = QPdfDocument(self)
+            if document.load(str(pdf_path)) != QPdfDocument.Error.None_:
+                ErrorDialog(self, message="Impossible de charger le PDF pour l'impression").exec()
+                return
+
+            painter = QPainter(printer)
+            printer_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+            page_size = QSize(int(printer_rect.width()), int(printer_rect.height()))
+            for page_number in range(document.pageCount()):
+                if page_number:
+                    printer.newPage()
+                page = document.render(page_number, page_size)
+                if page.isNull():
+                    painter.end()
+                    ErrorDialog(self, message="Impossible de rendre une page du PDF").exec()
+                    return
+                target = painter.viewport()
+                source = page.rect()
+                scaled = page.scaled(target.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                offset_x = (target.width() - scaled.width()) // 2
+                offset_y = (target.height() - scaled.height()) // 2
+                painter.drawImage(offset_x, offset_y, scaled)
+            painter.end()
+
+            session = get_session()
+            payroll_db = session.query(Payroll).get(payroll.id)
+            if payroll_db and payroll_db.payslip:
+                payroll_db.payslip.printed = True
+                payroll_db.payslip.printed_at = datetime.now()
+                session.commit()
+            session.close()
+            self.refresh_table()
+            InfoDialog(self, message="Fiche de paie envoyée à l'impression").exec()
+        except Exception as error:
+            ErrorDialog(self, message=f"Erreur d'impression: {error}").exec()
+
+    def _ensure_pdf_exists(self, payroll):
+        """Return the payslip PDF path, or explain why it cannot be printed."""
+        if not payroll.payslip or not payroll.payslip.pdf_path:
+            ErrorDialog(self, message="Aucun PDF généré pour cette paie. Générez d'abord le PDF depuis l'écran Paie.").exec()
+            return None
+
+        pdf_path = Path(payroll.payslip.pdf_path)
+        if not pdf_path.exists():
+            ErrorDialog(self, message="Le fichier PDF de cette fiche est introuvable. Générez-le à nouveau depuis l'écran Paie.").exec()
+            return None
+        return pdf_path
     
     def delete_payslip(self):
         """Delete payslip."""

@@ -1,24 +1,26 @@
-"""Application data paths with a Windows-safe fallback."""
-import os
+"""Application data paths."""
 from pathlib import Path
 
 
 def _create_app_dir() -> Path:
-    """Return a writable application directory, preferring Documents."""
+    """Return the writable application directory in the user's Documents folder."""
     candidates = [
-        Path.home() / "Documents" / "MEKPAIE",
-        Path(os.environ.get("LOCALAPPDATA", Path.home())) / "MEKPAIE",
+        Path.home() / "Documents",
+        Path.home() / "OneDrive" / "Documents",
     ]
 
-    last_error = None
-    for candidate in candidates:
+    for docs_dir in candidates:
         try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            return candidate
-        except OSError as error:
-            last_error = error
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            app_dir = docs_dir / "MEKPAIE"
+            app_dir.mkdir(parents=True, exist_ok=True)
+            return app_dir
+        except OSError:
+            continue
 
-    raise OSError("Impossible de créer le dossier de données de MEKPAIE") from last_error
+    fallback = Path.home() / "MEKPAIE"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 APP_DIR = _create_app_dir()

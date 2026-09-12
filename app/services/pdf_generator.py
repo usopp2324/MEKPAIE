@@ -28,8 +28,25 @@ class PDFPayslipGenerator:
     
     def __init__(self):
         self.page_width, self.page_height = A4
-        self.pdf_dir = PDF_DIR
+        self.pdf_dir = self._get_configured_directory()
         self.pdf_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _get_configured_directory() -> Path:
+        """Return the configured PDF directory, falling back to the default."""
+        try:
+            from app.database import get_session
+            from app.models import Settings
+
+            session = get_session()
+            setting = session.query(Settings).filter(
+                Settings.key == "pdf_directory"
+            ).first()
+            configured_path = Path(setting.value) if setting and setting.value else PDF_DIR
+            session.close()
+            return configured_path
+        except Exception:
+            return PDF_DIR
     
     def generate_payslip(
         self,
@@ -196,6 +213,7 @@ class PDFPayslipGenerator:
 
         right_block = [title_block, Spacer(1, 0.18*cm), employee_table]
         header_table = Table([
+            
             [[logo_element, Paragraph(company_text, company_style)], right_block]
         ], colWidths=[7.0*cm, 11.0*cm])
         header_table.setStyle(TableStyle([
@@ -229,15 +247,56 @@ class PDFPayslipGenerator:
         holiday_chome_paye = "Oui" if holiday_days > 0 and not worked_holiday and all_days_without_absence else "Non"
         holiday_travaille = "Oui" if holiday_days > 0 and worked_holiday and all_days_without_absence else "Non"
         regular_base_salary = float(payroll_data.get('regular_base_salary', payroll_data.get('base_salary', 0)) or 0)
+        raw_worked_value = float(payroll_data.get('hours_or_days_worked', 0) or 0)
+        real_worked_hours = float(payroll_data.get('real_hours_worked', raw_worked_value) or raw_worked_value)
+        if not payroll_data.get('real_hours_worked') and str(payroll_data.get('categorie', '')).lower() == 'mensuel' and raw_worked_value <= 31:
+            real_worked_hours = raw_worked_value * 8
+        if real_worked_hours <= 0:
+            real_worked_hours = raw_worked_value
+        real_worked_hours = max(real_worked_hours, 0)
+        hour_rate = float(payroll_data.get('hourly_rate', 0) or 0)
+        if not hour_rate:
+            hour_rate = float(payroll_data.get('rate_per_unit', 0) or 0)
+        if real_worked_hours > 0:
+            base_rate_per_hour = hour_rate or regular_base_salary / real_worked_hours
+        else:
+            base_rate_per_hour = hour_rate
+        # The base salary row must show only: worked hours × hourly base rate.
+        base_salary_only = real_worked_hours * base_rate_per_hour if real_worked_hours > 0 else 0.0
         total_gains = float(payroll_data.get('base_salary', regular_base_salary) or 0)
+        seniority_bonus = float(payroll_data.get('seniority_bonus_amount', 0) or 0)
+        seniority_percentage = float(payroll_data.get('seniority_percentage', 0) or 0)
+        seniority_years = int(payroll_data.get('seniority_years', 0) or 0)
+
+        days_worked = float(payroll_data.get('days_worked', 0) or 0)
+        absence_days = float(
+            payroll_data.get(
+                'absence_days',
+                payroll_data.get('days_absent', payroll_data.get('absent_days', payroll_data.get('days_absence', 0)))
+            ) or 0
+        )
+        absence_hours = float(payroll_data.get('absence_hours', 0) or 0)
+        if absence_hours <= 0 and absence_days > 0:
+            absence_hours = absence_days * 8.0
+        real_worked_hours = max(float(payroll_data.get('real_hours_worked', 0) or 0), 0)
+        if real_worked_hours > 0:
+            base_rate_per_hour = hour_rate or regular_base_salary / real_worked_hours
+        else:
+            base_rate_per_hour = hour_rate
+        absent_hours_value = absence_hours * base_rate_per_hour
+        effective_worked_days = max(real_worked_hours / 8.0, 0)
+        base_worked_days = effective_worked_days if effective_worked_days > 0 else max(hours_or_days / 8.0, 0) if hours_or_days > 30 else max(hours_or_days, 0)
+        worked_duration_display = f"{self._truncate_display_value(base_worked_days):.2f} j"
 
         earnings_data = [
             ['GAINS', 'BASE', 'MONTANT'],
-            ['Jours travaillés', '', str(display_worked_days)],
-            ['Montant férié payé', '', f"{holiday_amount:.2f}"],
-            ['Salaire par heure/jour', '', f"{payroll_data.get('rate_per_unit', 0):.2f} DH"],
-            ['Salaire de base régulier', '', f"{regular_base_salary:.2f}"],
+            ['Salaire de base', f"{worked_duration_display:>10}", f"{base_salary_only:.2f}"],
         ]
+        if seniority_years > 0 or seniority_bonus > 0:
+            earnings_data.append(['Ancienneté', f"{seniority_percentage * 100:.0f}%", f"{seniority_bonus:.2f}"])
+        if absence_hours > 0:
+            earnings_data.append(['Heures d\'absence', f"{absence_hours:>10.2f} h", f"-{absent_hours_value:.2f}"])
+        earnings_data.append(['Jours fériés payés', '', f"{holiday_amount:.2f}"])
         if overtime_amount_25 or overtime_amount_50:
             earnings_data.extend([
                 ['Heures supplémentaires 25%', f"{payroll_data.get('overtime_hours_25', 0):.2f} h", f"{overtime_amount_25:.2f}"],
@@ -368,11 +427,17 @@ class PDFPayslipGenerator:
         """Create premiums section for simplified payroll."""
         category = str((employee_info or {}).get('categorie', 'Mensuel') or 'Mensuel').lower()
         transport_enabled = bool((employee_info or {}).get('transport_premium_enabled', False))
-        hours_or_days = float(payroll_data.get('hours_or_days_worked', 0) or 0)
-        if category == 'horaire':
-            worked_days = self._truncate_display_value(hours_or_days / 8.0)
-        else:
-            worked_days = self._truncate_display_value(hours_or_days)
+        raw_hours_or_days = float(payroll_data.get('hours_or_days_worked', 0) or 0)
+
+        worked_days = float(payroll_data.get('days_worked', 0) or 0)
+        if worked_days <= 0:
+            real_hours_worked = float(payroll_data.get('real_hours_worked', raw_hours_or_days) or 0)
+            if category == 'horaire' or (raw_hours_or_days > 30 and category != 'par jours'):
+                worked_days = real_hours_worked / 8.0 if real_hours_worked > 0 else (raw_hours_or_days / 8.0 if raw_hours_or_days > 0 else 0)
+            else:
+                worked_days = raw_hours_or_days
+
+        worked_days = self._truncate_display_value(worked_days)
 
         premiums_data = [
             ['PRIMES', 'JOURS TRAVAILLÉS', 'MONTANT'],
@@ -441,6 +506,9 @@ class PDFPayslipGenerator:
         conge_chome_paye = float(payroll_data.get('holiday_paid_days', 0) or 0)
         conge_paye_non_chome = float(payroll_data.get('holiday_unpaid_days', 0) or 0)
         solde_conges = float(payroll_data.get('leave_balance', 0) or 0)
+        absence_hours = float(payroll_data.get('absence_hours', 0) or 0)
+        if absence_hours <= 0:
+            absence_hours = float(payroll_data.get('absence_days', 0) or 0) * 8.0
         justifiee = str(payroll_data.get('absence_justified', '') or '')
         autorisee = str(payroll_data.get('absence_authorized', '') or '')
         at = str(payroll_data.get('absence_at', '') or '')
@@ -450,6 +518,7 @@ class PDFPayslipGenerator:
         conge_chome_display = f'{conge_chome_paye:.0f}' if conge_chome_paye > 0 else ''
         conge_non_chome_display = f'{conge_paye_non_chome:.0f}' if conge_paye_non_chome > 0 else ''
         solde_display = f'{solde_conges:.2f}' if solde_conges > 0 else ''
+        absence_hours_display = f'{absence_hours:.2f}' if absence_hours > 0 else ''
 
         professional_fees = float(payroll_data.get('base_salary', 0) or 0) * 0.20
         total_premiums = sum(
@@ -470,6 +539,7 @@ class PDFPayslipGenerator:
                 '',
                 '',
                 '',
+                '',
                 Paragraph('Frais profession.', section_style),
                 Paragraph('NET IMPOSABLE', section_style),
             ],
@@ -480,6 +550,7 @@ class PDFPayslipGenerator:
                 Paragraph('Congé chômé payé', cell_style),
                 Paragraph('Congé payé non chômé', cell_style),
                 Paragraph('Solde congés', cell_style),
+                Paragraph('Heures abs.', cell_style),
                 Paragraph('Justifiée', cell_style),
                 Paragraph('Autorisée', cell_style),
                 Paragraph('AT', cell_style),
@@ -494,6 +565,7 @@ class PDFPayslipGenerator:
                 conge_chome_display,
                 conge_non_chome_display,
                 solde_display,
+                absence_hours_display,
                 justifiee,
                 autorisee,
                 at,
@@ -505,7 +577,7 @@ class PDFPayslipGenerator:
 
         summary_table = Table(
             main_table_data,
-            colWidths=[1.4*cm, 1.4*cm, 1.2*cm, 1.7*cm, 1.8*cm, 1.6*cm, 1.3*cm, 1.4*cm, 1.2*cm, 1.4*cm, 1.8*cm, 1.8*cm]
+            colWidths=[1.3*cm, 1.3*cm, 1.1*cm, 1.5*cm, 1.6*cm, 1.5*cm, 1.3*cm, 1.3*cm, 1.3*cm, 1.1*cm, 1.4*cm, 1.7*cm, 1.8*cm]
         )
         summary_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
